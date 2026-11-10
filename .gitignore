@@ -10,3 +10,10 @@
 !/edge/
 /edge/*
 !/edge/edge.py
+!/ui/
+/ui/*
+!/ui/app.py
+!/ui/app.js
+!/ui/index.html
+!/ui/style.css
+!/ui/test_app.py

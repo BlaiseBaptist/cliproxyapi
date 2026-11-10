@@ -31,3 +31,21 @@ services:
       - 127.0.0.1:8319:8319
       - 127.0.0.1:8317:8319
     restart: unless-stopped
+
+  agent-traffic-ui:
+    image: python:3-alpine
+    user: "1000:1000"
+    restart: unless-stopped
+    command: ["python3", "/app/app.py"]
+    ports:
+      - "127.0.0.1:8320:8320"
+    volumes:
+      - ./ui:/app:ro
+      - ./data:/data
+    environment:
+      TRAFFIC_DB: /data/requests.sqlite3
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

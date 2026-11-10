@@ -7,7 +7,7 @@ configuration and customizations, rather than an upstream source fork.
 ## What's tracked
 
 - `docker-compose.yml`: upstream API plus a Python edge proxy on loopback ports
-  8317 and 8319.
+  8317 and 8319, plus a read-only traffic viewer on loopback port 8320.
 - `config.example.yaml`: our active settings with credentials replaced and
   comments removed. The live `config.yaml` remains private.
 - `edge/edge.py`: preserves streaming responses, converts quota cooldown errors
@@ -17,6 +17,8 @@ configuration and customizations, rather than an upstream source fork.
   with the sponsor Quick Start navigation removed. The downloaded bundle stays
   local; the source release is linked in the download script.
 - `login.sh`: interactive Claude and Codex account login helper.
+- `ui/`: read-only web UI for live request bodies and imported historical
+  conversation records. Fixture checks: `python3 ui/test_app.py`.
 
 Credentials, auth files, databases, request bodies, logs, backups, downloaded
 panels and unknown files are excluded through an explicit Git allowlist.
@@ -59,9 +61,12 @@ all account login files remain outside Git.
 The API uses `eceasy/cli-proxy-api:latest`, not a local build. Docker does not
 rebuild or redeploy on Git changes. It bind-mounts `config.yaml`, `auths/`,
 `logs/`, and `static/management.html` from this checkout. The edge uses
-`python:3-alpine` and bind-mounts `edge/` and `data/`.
+`python:3-alpine` and bind-mounts `edge/` and `data/`. The traffic viewer uses
+the same image with `ui/` and `data/` mounts, opens SQLite read-only, and has no
+write endpoints. Its body downloads retain the complete stored content.
 
 - Restart the edge to load Python edits: `docker compose restart cliproxy-edge`.
+- Restart the viewer after UI edits: `docker compose restart agent-traffic-ui`.
 - Restart the API after config edits: `docker compose restart cliproxyapi`.
 - Recreate containers after Compose or mount changes: `docker compose up -d`.
 - Update the API image deliberately with `docker compose pull cliproxyapi`
