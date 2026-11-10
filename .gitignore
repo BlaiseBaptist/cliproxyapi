@@ -1,0 +1,12 @@
+# Public files are explicitly allowlisted. All runtime and unknown files stay local.
+/*
+!/.gitignore
+!/README.md
+!/docker-compose.yml
+!/config.example.yaml
+!/login.sh
+!/panel-patch.py
+!/prepare-panel.sh
+!/edge/
+/edge/*
+!/edge/edge.py
