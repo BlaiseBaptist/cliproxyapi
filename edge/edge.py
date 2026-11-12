@@ -21,6 +21,34 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 UPSTREAM = urlsplit(os.environ.get("UPSTREAM", "http://cliproxyapi:8317"))
+# cliproxy-dash records quota windows and caches quota reads; the patched panel
+# reaches both here, on its own origin, with its management key (checked there).
+DASH = urlsplit(os.environ.get("DASH_UPSTREAM", "http://cliproxy-dash:8318"))
+QUOTA_HISTORY_PATHS = {"/v0/management/quota-history", "/v8/management/quota-history"}
+# The panel's quota cards read these through the management api-call endpoint.
+# cliproxy-dash caches them (one upstream read per TTL shared by every reader),
+# so those GETs go there; everything else, including POSTs, goes to the proxy.
+API_CALL_PATHS = {"/v0/management/api-call", "/v8/management/requests/api-call"}
+CACHED_QUOTA_URLS = {
+    "https://api.anthropic.com/api/oauth/usage",
+    "https://api.anthropic.com/api/oauth/profile",
+    "https://chatgpt.com/backend-api/wham/usage",
+    "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
+    "https://chatgpt.com/backend-api/subscriptions",
+}
+
+
+def cached_quota_read(route, body):
+    if route not in API_CALL_PATHS:
+        return False
+    try:
+        req = json.loads(body)
+    except ValueError:
+        return False
+    return (isinstance(req, dict) and (req.get("method") or "GET").upper() == "GET"
+            and req.get("url") in CACHED_QUOTA_URLS)
+
+
 LISTEN_HOST, LISTEN_PORT = os.environ.get("LISTEN", "0.0.0.0:8319").rsplit(":", 1)
 HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
        "te", "trailers", "transfer-encoding", "upgrade", "host", "content-length",
@@ -169,8 +197,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = self._read_body(log)
             headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
-            conn = http.client.HTTPConnection(UPSTREAM.hostname, UPSTREAM.port, timeout=3600)
-            conn.request(self.command, self.path, body=body or None, headers=headers)
+            target, path = UPSTREAM, self.path
+            route, _, query = self.path.partition("?")
+            if route in QUOTA_HISTORY_PATHS:
+                target = DASH
+                path = "/v0/management/quota-history" + ("?" + query if query else "")
+            elif self.command == "POST" and cached_quota_read(route, body):
+                target, path = DASH, "/v0/management/api-call"
+            conn = http.client.HTTPConnection(target.hostname, target.port, timeout=3600)
+            conn.request(self.command, path, body=body or None, headers=headers)
             resp = conn.getresponse()
             out_headers = [(k, v) for k, v in resp.getheaders() if k.lower() not in HOP]
             if resp.status == 429:

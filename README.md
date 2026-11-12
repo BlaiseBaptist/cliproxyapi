@@ -18,8 +18,15 @@ configuration and customizations, rather than an upstream source fork.
   to `usage_limit_reached`, normalizes bare `cyber_policy` SSE errors, and records
   request/response traffic in a local SQLite database.
 - `panel-patch.py` and `prepare-panel.sh`: reproduce the pinned management panel
-  with the sponsor Quick Start navigation removed. The downloaded bundle stays
-  local; the source release is linked in the download script.
+  with these changes: the sponsor Quick Start navigation is removed; quota
+  cards load on their own instead of behind a click; and the Quota windows
+  timeline draws recorded windows instead of a fixed grid extrapolated from
+  the current one. The downloaded bundle stays local; the source release is
+  linked in the download script.
+- The edge sends two management routes to cliproxy-dash (`DASH_UPSTREAM`):
+  `/v8/management/quota-history` (the recorded windows) and quota GETs on
+  `/v8/management/requests/api-call` (served from its shared cache, so loading
+  the panel does not hit Anthropic or OpenAI). Everything else goes to the API.
 - `login.sh`: interactive Claude and Codex account login helper.
 - `ui/`: read-only web UI for live request bodies and imported historical
   conversation records. Fixture checks: `python3 ui/test_app.py`.
