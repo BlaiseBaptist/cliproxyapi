@@ -73,6 +73,8 @@ main{max-width:1800px;margin:auto;padding-block:0 2rem;padding-left:var(--gutter
 form{display:flex;flex-wrap:wrap;gap:.7rem;align-items:end;margin-top:.8rem}
 .field{display:flex;flex-direction:column;gap:.3rem;min-width:115px;flex:1}
 .field label{font-size:.75rem;font-weight:650;color:var(--label)}
+.field input[type=datetime-local]{-webkit-appearance:none;appearance:none;display:block;max-width:100%;text-align:left}
+.field input::-webkit-date-and-time-value{text-align:left;min-height:1.5em}
 .field input,.field select{width:100%;min-width:0;height:2.5rem;border:1px solid var(--control);border-radius:6px;padding:.52rem;background:var(--surface);color:var(--fg)}
 .primary{background:var(--accent-fill);border-color:var(--accent-fill);color:var(--on-accent)}
 .primary:hover:not(:disabled){background:var(--accent-fill-2);border-color:var(--accent-fill-2);color:var(--on-accent)}
@@ -152,7 +154,7 @@ footer{text-align:center;color:var(--muted);font-size:.75rem;padding-block:0 2re
   form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem}
   .field{min-width:0}
   .field:has(input[type=datetime-local]),.field:has(#filter-path),.field:has(#filter-search){grid-column:1/-1}
-  .field input,.field select{font-size:16px;min-height:2.6rem}
+  .field input,.field select{font-size:16px;height:2.75rem;min-height:0;line-height:1.25}
   form .primary{grid-column:1/-1;min-height:2.75rem}
   form:has(#filter-search) .field:has(#sort){grid-column:1/-1}
   .tabs button{padding:.6rem .45rem;font-size:.85rem}
