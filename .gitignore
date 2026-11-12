@@ -19,3 +19,10 @@
 !/ui/index.html
 !/ui/style.css
 !/ui/test_app.py
+!/ui/migrate.py
+!/ui/test_migrate.py
+!/ui/provider.py
+!/ui/test_provider.py
+!/ui/presentation.py
+!/ui/index_usage.py
+!/ui/test_usage.py

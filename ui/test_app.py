@@ -1,5 +1,7 @@
 import json, os, socket, sqlite3, subprocess, tempfile, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
+from migrate import migrate
+from index_usage import index_once
 
 root=Path(__file__).resolve().parent
 with tempfile.TemporaryDirectory() as tmp:
@@ -20,6 +22,25 @@ with tempfile.TemporaryDirectory() as tmp:
             except OSError: time.sleep(.05)
         assert js('/api/archive')['available'] is False
         assert js('/api/requests?method=POST&status=200')['rows'][0]['id']==1
+        assert js('/api/requests?since=2')['rows']==[]
+        assert js('/api/requests')['rows'][0]['duration_ms']==1000
+        assert js('/api/request?id=1')['duration_ms']==1000
+        assert js('/api/outputs')['rows']==[]  # Non-model traffic stays out of the library.
+        c.execute('INSERT INTO requests VALUES(2,3,4,?,?,?,?,?,?,?)',('POST','/v1/responses','{}',200,'{}','complete',None))
+        response=json.dumps({'model':'fixture-model','output':[{'type':'message','role':'assistant','content':[{'type':'output_text','text':'Readable model answer'}]}],'usage':{'input_tokens':10,'output_tokens':3,'total_tokens':13}}).encode()
+        prompt=json.dumps({'model':'fixture-model','instructions':'Be clear','input':'Explain the result'}).encode()
+        c.executemany('INSERT INTO body_chunks VALUES(?,?,?,?)',[(2,'request',0,prompt),(2,'response',0,response[:25]),(2,'response',1,response[25:])]);c.commit()
+        output=js('/api/outputs')['rows'][0]
+        assert output['model']=='fixture-model' and output['prompt_preview']=='Explain the result'
+        assert output['output_preview']=='Readable model answer'
+        parsed=js('/api/exchange?id=2')
+        assert parsed['output'][0]['text']=='Readable model answer'
+        assert [x['text'] for x in parsed['prompt']]==['Be clear','Explain the result']
+        assert parsed['usage']['total_tokens']==13
+        assert 'request_headers' not in parsed and 'response_headers' not in parsed
+        try: get('/api/requests?since=not-a-date')
+        except urllib.error.HTTPError as e: assert e.code==400
+        else: raise AssertionError('invalid timestamp accepted')
         assert get('/api/body?id=1&direction=request&download=1')==expected
         assert get('/api/body?id=1&direction=response&download=1')==b'data: one\n\ndata: two\n\n'
         assert js('/api/body?id=1&direction=request&offset=65536')['total']==len(expected)
@@ -29,11 +50,34 @@ with tempfile.TemporaryDirectory() as tmp:
         assert js('/api/archive?host=fixture&source=codex_jsonl&search=snow')['rows'][0]['record_id']=='abc'
         q=urllib.parse.urlencode({'host':'fixture','source':'codex_jsonl','path':'/session/a','record_id':'abc'})
         assert json.loads(js('/api/archive-record?'+q)['content_json'])['content'].startswith('snow 雪')
+        c.executemany('INSERT INTO archive_records VALUES(?,?,?,?,?,?,?,?)',[
+            ('fixture','codex_jsonl','/session/a',str(n),'1700000000',json.dumps({'role':'assistant','content':f'indexed test {n} 50%_ snow 雪'}),'hash','today') for n in range(35)])
+        c.commit()
+        migrate(str(db),batch_size=10)
+        index_once(str(db))
+        assert js('/api/summary')['tokens']['total']==13
+        assert js('/api/summary')['tokens']['with_usage']==1
+        assert js('/api/summary')['search_index'] is True
+        assert js('/api/summary')['archive_count']==36
+        assert js('/api/summary')['archive_sessions']==1
+        assert js('/api/summary')['archive_hosts']==['fixture']
+        assert js('/api/archive?search=indexed')['more'] is True
+        assert len(js('/api/archive?search=50%25_')['rows'])==30
+        assert js('/api/archive?search=snow')['rows']
+        assert js('/api/archive?search=%22+OR+anything+--')['rows']==[]
+        assert js('/api/archive?sort=oldest')['rows'][0]['record_id']=='abc'
+        assert js('/api/archive')['rows'][0]['record_id']=='34'
+        assert js('/api/archive')['rows'][0]['preview']
+        session=js('/api/archive-session?host=fixture&source=codex_jsonl&path=/session/a')
+        assert len(session['rows'])==30 and session['more']
+        rest=js('/api/archive-session?host=fixture&source=codex_jsonl&path=/session/a&after='+str(session['next_cursor']))
+        assert len(rest['rows'])==6 and not rest['more']
+        assert not set(x['record_id'] for x in session['rows']) & set(x['record_id'] for x in rest['rows'])
         try: urllib.request.urlopen(urllib.request.Request(base+'/api/requests',data=b'{}',method='POST'))
         except urllib.error.HTTPError as e: assert e.code==405
         else: raise AssertionError('write accepted')
         assert b'textContent' in get('/app.js') and b'innerHTML' not in get('/app.js')
-        assert c.execute('SELECT count(*) FROM requests').fetchone()[0]==1
+        assert c.execute('SELECT count(*) FROM requests').fetchone()[0]==2
         print('Fixture checks passed: missing archive, filters, streamed/binary bodies, Unicode, HTML, archive content, read-only methods.')
     finally:
         proc.terminate();proc.wait();c.close()

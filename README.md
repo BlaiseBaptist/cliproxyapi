@@ -32,8 +32,11 @@ configuration and customizations, rather than an upstream source fork.
   `/v8/management/requests/api-call` (served from its shared cache, so loading
   the panel does not hit Anthropic or OpenAI). Everything else goes to the API.
 - `login.sh`: interactive Claude and Codex account login helper.
-- `ui/`: read-only web UI for live request bodies and imported historical
-  conversation records. Fixture checks: `python3 ui/test_app.py`.
+- `ui/`: read-only web UI for captured provider prompts/responses and historical
+  conversation records, with a dark model-output library, filterable tables,
+  readable prompts/responses and overall provider usage. Checks:
+  `python3 ui/test_app.py`, `python3 ui/test_migrate.py`,
+  `python3 ui/test_provider.py` and `python3 ui/test_usage.py`.
 
 Credentials, auth files, databases, request bodies, logs, backups, downloaded
 panels and unknown files are excluded through an explicit Git allowlist.
@@ -90,6 +93,63 @@ write endpoints. Its body downloads retain the complete stored content.
 The existing host manages this deployment via an enclosing Compose file that
 includes this `docker-compose.yml`. On that host, run those commands using
 `docker compose -f ../compose.yml` to preserve its project and network.
+
+## Model output library and archive indexes
+
+The explorer follows [Grafana Explore](https://grafana.com/docs/grafana/latest/explore/)
+for filtering and inspection and [Langfuse](https://langfuse.com/docs/observability/overview)
+for conversation-oriented details. Filters, pagination and selected records
+are preserved in the URL. Archive ordering means import order, rather than
+conversation timestamp; session messages load in batches. The interface shows
+the provider's response first, its recorded prompt, reasoning/tool calls when
+supplied, generation settings, completion details and usage. It does not display
+raw HTTP traffic, headers or transport JSON. Original bytes remain stored and
+the existing read-only body API is retained. Model exchanges have a visible
+32 MiB per-direction display limit; storage remains complete. Summary values
+refresh at most once per minute. The viewer remains read-only.
+
+Run the additive, resumable database migration as the owner of `data/`:
+
+```sh
+python3 ui/migrate.py data/requests.sqlite3 --backup data/before-explorer.sqlite3
+docker compose -f ../compose.yml restart agent-traffic-ui
+docker compose -f ../compose.yml up -d model-output-indexer
+```
+
+Use a new backup filename each time; existing files are never overwritten.
+Requires SQLite 3.43+ with FTS5 and its trigram tokenizer (available in the current
+deployment image). The online backup pins a WAL read snapshot while traffic
+recording continues. After backup, short write transactions populate the search
+index; imports and proxy recording can briefly wait for each batch.
+
+The original `requests`, `body_chunks`, `archive_records` and `archive_versions`
+data are retained. Derived indexes add fast status/method/time filters, a session
+directory, and a [contentless FTS5 trigram index](https://www.sqlite.org/fts5.html)
+for literal content searches of three or more characters. Shorter searches still
+scan JSON and may need host/source filters. Insert/update/delete triggers keep
+the search index current, including importer `INSERT OR REPLACE` writes. The
+viewer falls back to ordinary substring search until indexing finishes.
+
+Search uses the stored JSON text, including its escaping, rather than extracted
+conversation text. Indexing does not duplicate bodies or JSON in another content
+table. The FTS mapping uses archive rowids: after a manual `VACUUM`, table rebuild
+or restore into a different schema, rebuild derived search data before serving
+indexed searches. In a maintenance window, drop `archive_search` and its three
+`archive_search_*` triggers, delete the `archive_search_v1` row from
+`viewer_migrations`, and rerun the migration. Keep backups private, like the
+original database.
+
+`model-output-indexer` continuously derives previews and durable per-call usage
+from completed provider responses, without modifying original records. Its
+`model_token_usage` ledger keys each captured call by request ID; the UI sums
+input/output/total tokens and reports coverage for responses missing usage.
+Explicit provider totals take precedence. OpenAI cache/reasoning details are
+subtotals; Anthropic's separately reported cache input categories are added to
+base input, and Gemini's thought tokens are included in output. No token counts
+are estimated from text. Imported `sqlite_requests` usage lives in a separate
+`archived_token_usage` ledger, deduplicated by exact content hash. Imported logs
+may overlap captured calls, so the UI reports their total separately and never
+adds the two scopes together. Nested cumulative session usage is not summed.
 
 At initial publication, the installed API reports version `v8.0.32`, upstream
 commit `911f49c`, built 2026-10-16. Its pulled image digest is:
