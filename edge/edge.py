@@ -11,12 +11,16 @@ Also wraps bare SSE cyber_policy errors in response.failed. Codex 0.167.0
 ignores the bare form and retries an apparent disconnect; response.failed
 preserves the upstream refusal and makes it terminal.
 """
+import base64
 import http.client
 import json
 import os
+import signal
 import sqlite3
 import sys
+import threading
 import time
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -121,42 +125,225 @@ def safe_headers(headers):
                        "secret" in k.lower()) else v) for k, v in headers])
 
 
-class Recorder:
-    """Each operation is committed independently; logging never breaks proxying."""
-    def __init__(self, handler):
-        self.id = None
-        self.seq = {"request": 0, "response": 0}
-        self.run(lambda c: self.start(c, handler))
+SCHEMA = (
+    "CREATE TABLE IF NOT EXISTS requests (id INTEGER PRIMARY KEY, started REAL NOT NULL, finished REAL, method TEXT, path TEXT, request_headers TEXT, status INTEGER, response_headers TEXT, outcome TEXT, error TEXT)",
+    "CREATE TABLE IF NOT EXISTS body_chunks (request_id INTEGER NOT NULL, direction TEXT NOT NULL, seq INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY(request_id,direction,seq)) WITHOUT ROWID",
+)
+REQUEST_COLUMNS = {"finished", "method", "path", "request_headers", "status", "response_headers", "outcome", "error"}
 
-    def run(self, action):
+
+class Writer:
+    """The only code that writes the traffic database.
+
+    Proxy threads call put() and never wait on SQLite: a single background
+    thread commits queued records in batches. While the database is locked
+    (a migration, an import, a backup) it keeps retrying and the queue grows.
+    Past MAX_QUEUE_BYTES, records spill to a spool file next to the database,
+    replayed once writing resumes. Shutdown spools whatever is still unwritten.
+
+    Every record is an upsert keyed by (request id) or (request id, direction,
+    seq), so records may be written in any order and replayed safely.
+    """
+    BATCH = 500
+    MAX_QUEUE_BYTES = int(os.environ.get("EDGE_MAX_QUEUE_BYTES", str(64 << 20)))
+
+    def __init__(self, path):
+        self.path = path
+        self.spool = path + ".spool"
+        self.cond = threading.Condition()
+        self.queue, self.queued_bytes = [], 0
+        self.inflight = []
+        self.stopping = False
+        self.next_id = self.max_id() + 1
+        self.thread = threading.Thread(target=self.loop, name="edge-db-writer", daemon=True)
+
+    def max_id(self):
+        top = 0
+        try:  # a WAL read; it doesn't wait for writers
+            with closing(sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=30)) as c:
+                top = c.execute("SELECT MAX(id) FROM requests").fetchone()[0] or 0
+        except sqlite3.Error:
+            pass  # new database
+        for name in self.spool_files():
+            for rec in self.read_spool(name):
+                top = max(top, rec[1])
+        return top
+
+    def new_id(self):
+        with self.cond:
+            self.next_id += 1
+            return self.next_id - 1
+
+    @staticmethod
+    def size(rec):
+        return 64 + sum(len(v) for v in rec if isinstance(v, (bytes, str))) + (
+            sum(len(str(v)) for v in rec[3].values()) if rec[0] == "request" else 0)
+
+    def put(self, rec):
+        size = self.size(rec)
+        with self.cond:
+            if self.queued_bytes + size > self.MAX_QUEUE_BYTES:
+                self.append_spool([rec])
+                return
+            self.queue.append(rec)
+            self.queued_bytes += size
+            self.cond.notify()
+
+    # --- spool ------------------------------------------------------------
+
+    def spool_files(self):
+        folder, base = os.path.split(self.spool)
         try:
-            with sqlite3.connect(DB_PATH, timeout=2) as c:
-                c.execute("PRAGMA busy_timeout=2000")
-                action(c)
-        except Exception as exc:
-            # Never print exception details: paths, headers or SQL may be sensitive.
-            print("edge database error: " + type(exc).__name__, file=sys.stderr, flush=True)
+            names = os.listdir(folder or ".")
+        except OSError:
+            return []
+        return sorted(os.path.join(folder, n) for n in names if n.startswith(os.path.basename(base)))
 
-    def start(self, c, h):
-        c.execute("PRAGMA journal_mode=WAL")
-        c.execute("CREATE TABLE IF NOT EXISTS requests (id INTEGER PRIMARY KEY, started REAL NOT NULL, finished REAL, method TEXT, path TEXT, request_headers TEXT, status INTEGER, response_headers TEXT, outcome TEXT, error TEXT)")
-        c.execute("CREATE TABLE IF NOT EXISTS body_chunks (request_id INTEGER NOT NULL, direction TEXT NOT NULL, seq INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY(request_id,direction,seq)) WITHOUT ROWID")
-        self.id = c.execute("INSERT INTO requests(started,method,path,request_headers) VALUES(?,?,?,?)", (time.time(), h.command, h.path, safe_headers(h.headers.items()))).lastrowid
+    def append_spool(self, recs):
+        with open(self.spool, "a", encoding="ascii") as f:
+            for rec in recs:
+                f.write(json.dumps([base64.b64encode(v).decode() if isinstance(v, bytes) else v for v in rec]) + "\n")
+
+    @staticmethod
+    def read_spool(name):
+        with open(name, encoding="ascii") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue  # a line cut short by a crash
+                if rec[0] == "chunk":
+                    rec[4] = base64.b64decode(rec[4])
+                yield rec
+
+    def take_spool(self):
+        """Move the spool aside for replay; new spills start a fresh file."""
+        with self.cond:
+            if os.path.exists(self.spool):
+                os.replace(self.spool, f"{self.spool}.{time.time_ns()}")
+        return [n for n in self.spool_files() if n != self.spool]
+
+    # --- writing ----------------------------------------------------------
+
+    @staticmethod
+    def apply(c, rec):
+        if rec[0] == "chunk":
+            c.execute("INSERT OR IGNORE INTO body_chunks VALUES(?,?,?,?)", rec[1:])
+            return
+        _, rid, started, fields = rec
+        cols = [k for k in fields if k in REQUEST_COLUMNS]
+        c.execute(
+            f"INSERT INTO requests(id,started{''.join(',' + k for k in cols)}) VALUES(?,?{',?' * len(cols)})"
+            f" ON CONFLICT(id) DO UPDATE SET {', '.join(f'{k}=excluded.{k}' for k in cols) or 'id=id'}",
+            [rid, started, *(fields[k] for k in cols)])
+
+    def commit(self, recs):
+        with closing(sqlite3.connect(self.path, timeout=5)) as c:
+            c.execute("PRAGMA busy_timeout=5000")
+            with c:
+                for rec in recs:
+                    self.apply(c, rec)
+
+    def write(self, recs):
+        """Commit recs, retrying until it works or the edge stops. False if stopped."""
+        delay = 0.5
+        while True:
+            try:
+                self.commit(recs)
+                return True
+            except sqlite3.Error as exc:
+                print("edge database busy, retrying: " + type(exc).__name__, file=sys.stderr, flush=True)
+            if self.stopping:
+                return False
+            time.sleep(delay)
+            delay = min(delay * 2, 10)
+
+    def setup(self):
+        while not self.stopping:
+            try:
+                with closing(sqlite3.connect(self.path, timeout=5)) as c:
+                    c.execute("PRAGMA journal_mode=WAL")
+                    for sql in SCHEMA:
+                        c.execute(sql)
+                    c.commit()
+                return True
+            except sqlite3.Error as exc:
+                print("edge database setup busy, retrying: " + type(exc).__name__, file=sys.stderr, flush=True)
+                time.sleep(2)
+        return False
+
+    def loop(self):
+        if not self.setup():
+            return
+        while not self.stopping:
+            for name in self.take_spool():
+                recs = list(self.read_spool(name))
+                for i in range(0, len(recs), self.BATCH):
+                    if not self.write(recs[i:i + self.BATCH]):
+                        return
+                os.remove(name)
+            with self.cond:
+                while not self.queue and not self.stopping and not os.path.exists(self.spool):
+                    self.cond.wait(1)
+                self.inflight, self.queue = self.queue[:self.BATCH], self.queue[self.BATCH:]
+                self.queued_bytes -= sum(self.size(r) for r in self.inflight)
+            if self.inflight and not self.write(self.inflight):
+                return
+            self.inflight = []
+
+    def start(self):
+        self.thread.start()
+
+    def stop(self, wait=3):
+        """Write what can be written quickly, then spool the rest."""
+        deadline = time.time() + wait
+        while time.time() < deadline:
+            with self.cond:
+                if not self.queue and not self.inflight:
+                    break
+            time.sleep(0.05)
+        with self.cond:
+            self.stopping = True
+            self.cond.notify_all()
+        self.thread.join(timeout=5)  # Docker allows 10 s after SIGTERM
+        with self.cond:
+            rest = self.inflight + self.queue
+            self.inflight, self.queue = [], []
+            if rest:
+                self.append_spool(rest)
+
+
+writer = None  # set in main; tests may install their own
+
+
+class Recorder:
+    """Queues one request's records; logging never slows or breaks proxying."""
+    def __init__(self, handler):
+        self.seq = {"request": 0, "response": 0}
+        self.id, self.started = None, time.time()
+        if writer is None:
+            return
+        self.id = writer.new_id()
+        self.put({"method": handler.command, "path": handler.path,
+                  "request_headers": safe_headers(handler.headers.items())})
+
+    def put(self, fields):
+        writer.put(("request", self.id, self.started, fields))
 
     def chunk(self, direction, data):
         if self.id is None or not data:
             return
         seq = self.seq[direction]
         self.seq[direction] += 1
-        self.run(lambda c: c.execute("INSERT INTO body_chunks VALUES(?,?,?,?)", (self.id, direction, seq, data)))
+        writer.put(("chunk", self.id, direction, seq, bytes(data)))
 
     def headers(self, status, headers):
         if self.id is not None:
-            self.run(lambda c: c.execute("UPDATE requests SET status=?,response_headers=? WHERE id=?", (status, safe_headers(headers), self.id)))
+            self.put({"status": status, "response_headers": safe_headers(headers)})
 
     def finish(self, outcome, error=None):
         if self.id is not None:
-            self.run(lambda c: c.execute("UPDATE requests SET finished=?,outcome=?,error=? WHERE id=?", (time.time(), outcome, error, self.id)))
+            self.put({"finished": time.time(), "outcome": outcome, "error": error})
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -280,5 +467,12 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     os.umask(0o077)
     ThreadingHTTPServer.daemon_threads = True
+    writer = Writer(DB_PATH)
+    writer.start()
+    server = ThreadingHTTPServer((LISTEN_HOST, int(LISTEN_PORT)), Handler)
+    signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown).start())
     print(f"edge listening on {LISTEN_HOST}:{LISTEN_PORT} -> {UPSTREAM.geturl()}", flush=True)
-    ThreadingHTTPServer((LISTEN_HOST, int(LISTEN_PORT)), Handler).serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        writer.stop()

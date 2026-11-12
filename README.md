@@ -16,7 +16,11 @@ configuration and customizations, rather than an upstream source fork.
   comments removed. The live `config.yaml` remains private.
 - `edge/edge.py`: preserves streaming responses, converts quota cooldown errors
   to `usage_limit_reached`, normalizes bare `cyber_policy` SSE errors, and records
-  request/response traffic in a local SQLite database.
+  request/response traffic in a local SQLite database. One background thread
+  writes it in batches, so a locked database (a migration, import or backup)
+  never delays proxying: records wait in memory, spill to
+  `data/requests.sqlite3.spool*` past 64 MB (`EDGE_MAX_QUEUE_BYTES`), and are
+  written once the lock clears. Records still queued at shutdown are spooled too.
 - `panel-patch.py` and `prepare-panel.sh`: reproduce the pinned management panel
   with these changes: the sponsor Quick Start navigation is removed; quota
   cards load on their own instead of behind a click; and the Quota windows
