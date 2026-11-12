@@ -154,6 +154,8 @@ footer{text-align:center;color:var(--muted);font-size:.75rem;padding-block:0 2re
   .field:has(input[type=datetime-local]),.field:has(#filter-path),.field:has(#filter-search){grid-column:1/-1}
   .field input,.field select{font-size:16px;min-height:2.6rem}
   form .primary{grid-column:1/-1;min-height:2.75rem}
+  form:has(#filter-search) .field:has(#sort){grid-column:1/-1}
+  .tabs button{padding:.6rem .45rem;font-size:.85rem}
   .list-heading,.detail-head,#detail-content{padding:.85rem}
 
   .table-wrap{max-height:none;overflow:visible}
