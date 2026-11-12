@@ -77,6 +77,7 @@ with tempfile.TemporaryDirectory() as tmp:
         except urllib.error.HTTPError as e: assert e.code==405
         else: raise AssertionError('write accepted')
         assert b'textContent' in get('/app.js') and b'innerHTML' not in get('/app.js')
+        assert get('/favicon.svg').startswith(b'<svg') and get('/apple-touch-icon.png').startswith(b'\x89PNG') and get('/favicon.ico')[:4]==b'\0\0\1\0'
         assert c.execute('SELECT count(*) FROM requests').fetchone()[0]==2
         print('Fixture checks passed: missing archive, filters, streamed/binary bodies, Unicode, HTML, archive content, read-only methods.')
     finally:

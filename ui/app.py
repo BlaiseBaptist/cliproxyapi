@@ -8,6 +8,14 @@ from presentation import exchange, preview, archive_messages
 from index_usage import _model_request
 
 DB = os.environ.get('TRAFFIC_DB', '/data/requests.sqlite3')
+STATIC = {
+    '/': ('index.html', 'text/html; charset=utf-8'),
+    '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
+    '/style.css': ('style.css', 'text/css; charset=utf-8'),
+    '/favicon.svg': ('favicon.svg', 'image/svg+xml'),
+    '/favicon.ico': ('favicon.ico', 'image/x-icon'),
+    '/apple-touch-icon.png': ('apple-touch-icon.png', 'image/png'),
+}
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIMIT = 30
 SUMMARY_LOCK = threading.Lock()
@@ -105,10 +113,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u=urlsplit(self.path); q=parse_qs(u.query); p=u.path
         try:
-            if p in ('/','/app.js','/style.css'):
-                name={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}[p]
+            if p in STATIC:
+                name,kind=STATIC[p]
                 with open(os.path.join(HERE,name),'rb') as f: data=f.read()
-                return self.send(200,data,{'/':'text/html; charset=utf-8','/app.js':'text/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[p])
+                return self.send(200,data,kind)
             with closing(connection()) as c:
                 if p=='/api/health': return self.send(200,{'ok': bool(c.execute('SELECT 1').fetchone())})
                 if p=='/api/summary':

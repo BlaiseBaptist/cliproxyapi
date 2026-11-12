@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Model outputs viewer on war: a stored-records database, in war's red -->
+  <rect width="64" height="64" rx="14" fill="#14171c"/>
+  <g fill="#262d38" stroke="#4a5566" stroke-width="2">
+    <path d="M14 18v28c0 4 8 7 18 7s18-3 18-7V18"/>
+  </g>
+  <g fill="none" stroke="#e5484d" stroke-width="3">
+    <ellipse cx="32" cy="18" rx="18" ry="7" fill="#262d38"/>
+    <path d="M14 27.5c0 4 8 7 18 7s18-3 18-7"/>
+    <path d="M14 37c0 4 8 7 18 7s18-3 18-7"/>
+  </g>
+  <rect x="38" y="47" width="8" height="2.5" rx="1.2" fill="#8b96a5"/>
+</svg>

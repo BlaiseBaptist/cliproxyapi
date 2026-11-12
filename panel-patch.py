@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Strip the APIKEY.FUN sponsor "Quick Start" page from a CLIProxyAPI
-Management Center bundle.
+Management Center bundle and give it war's red panel icon.
 
 Usage: python3 panel-patch.py IN.html OUT.html
 
@@ -10,9 +10,24 @@ management.html as management.html.orig, rerun this, recreate the container.
 Each substitution must match exactly once, so a changed bundle fails loudly
 instead of being half-patched.
 """
+import base64
 import sys
 
+# War-red control-panel icon, matching the other pages on war.
+PANEL_ICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- CLIProxyAPI management panel on war: a control knob and sliders, in war's red -->
+  <rect width="64" height="64" rx="14" fill="#14171c"/>
+  <rect x="9" y="11" width="46" height="42" rx="6" fill="#262d38" stroke="#4a5566" stroke-width="2"/>
+  <g stroke="#4a5566" stroke-width="3" stroke-linecap="round"><path d="M18 22h28M18 32h28M18 42h28"/></g>
+  <g fill="#e5484d"><circle cx="38" cy="22" r="4.5"/><circle cx="25" cy="32" r="4.5"/><circle cx="33" cy="42" r="4.5"/></g>
+</svg>"""
+PANEL_ICON_URI = "data:image/svg+xml;base64," + base64.b64encode(PANEL_ICON.encode()).decode()
+
 SUBS = [
+    # Replace the stock Vite favicon; the old link stays in place, inert.
+    ('<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg',
+     f'<link rel="icon" type="image/svg+xml" href="{PANEL_ICON_URI}">'
+     '<link rel="x-upstream-icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg'),
     # Quick Start nav item, in whichever sidebar group it lands
     (",...fe?[]:[pe]]}", "]}"),
     (",...fe?[pe]:[]]}", "]}"),

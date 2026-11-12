@@ -25,7 +25,8 @@ configuration and customizations, rather than an upstream source fork.
   with these changes: the sponsor Quick Start navigation is removed; quota
   cards load on their own instead of behind a click; and the Quota windows
   timeline draws recorded windows instead of a fixed grid extrapolated from
-  the current one. The downloaded bundle stays local; the source release is
+  the current one. Its stock Vite icon is replaced with war's red panel icon.
+  The downloaded bundle stays local; the source release is
   linked in the download script.
 - The edge sends two management routes to cliproxy-dash (`DASH_UPSTREAM`):
   `/v8/management/quota-history` (the recorded windows) and quota GETs on
@@ -106,7 +107,7 @@ supplied, generation settings, completion details and usage. It does not display
 raw HTTP traffic, headers or transport JSON. Original bytes remain stored and
 the existing read-only body API is retained. Model exchanges have a visible
 32 MiB per-direction display limit; storage remains complete. The viewer follows
-the system light or dark setting. On phones, records
+the system light or dark setting and has its own icon, in war's red. On phones, records
 show as stacked cards and the inspector opens above the list. Summary values
 refresh at most once per minute. The viewer remains read-only.
 

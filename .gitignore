@@ -18,6 +18,9 @@
 !/ui/app.js
 !/ui/index.html
 !/ui/style.css
+!/ui/favicon.svg
+!/ui/favicon.ico
+!/ui/apple-touch-icon.png
 !/ui/test_app.py
 !/ui/migrate.py
 !/ui/test_migrate.py
