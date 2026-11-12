@@ -105,7 +105,8 @@ the provider's response first, its recorded prompt, reasoning/tool calls when
 supplied, generation settings, completion details and usage. It does not display
 raw HTTP traffic, headers or transport JSON. Original bytes remain stored and
 the existing read-only body API is retained. Model exchanges have a visible
-32 MiB per-direction display limit; storage remains complete. Summary values
+32 MiB per-direction display limit; storage remains complete. On phones, records
+show as stacked cards and the inspector opens above the list. Summary values
 refresh at most once per minute. The viewer remains read-only.
 
 Run the additive, resumable database migration as the owner of `data/`:
