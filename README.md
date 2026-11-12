@@ -1,5 +1,9 @@
 # CLIProxyAPI deployment
 
+> This is a personal setup for one machine, published so others can borrow from
+> it. It is not supported: there are no guarantees, and issues and requests are
+> unlikely to get a response.
+
 Our Docker deployment settings and local edge proxy for CLIProxyAPI. The API
 server binary comes from `eceasy/cli-proxy-api`; this repository contains our
 configuration and customizations, rather than an upstream source fork.

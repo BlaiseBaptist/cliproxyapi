@@ -2,6 +2,8 @@
 /*
 !/.gitignore
 !/README.md
+!/AGENTS.md
+!/CLAUDE.md
 !/docker-compose.yml
 !/config.example.yaml
 !/login.sh
