@@ -29,6 +29,9 @@ UPSTREAM = urlsplit(os.environ.get("UPSTREAM", "http://cliproxyapi:8317"))
 # reaches both here, on its own origin, with its management key (checked there).
 DASH = urlsplit(os.environ.get("DASH_UPSTREAM", "http://cliproxy-dash:8318"))
 QUOTA_HISTORY_PATHS = {"/v0/management/quota-history", "/v8/management/quota-history"}
+# Account-list reads also go to cliproxy-dash, which accepts its quota-only read
+# key for them (T3 hubs on other boxes) as well as the management key.
+ACCOUNT_LIST_PATHS = {"/v0/management/auth-files", "/v0/management/auth-files/models"}
 # The panel's quota cards read these through the management api-call endpoint.
 # cliproxy-dash caches them (one upstream read per TTL shared by every reader),
 # so those GETs go there; everything else, including POSTs, goes to the proxy.
@@ -389,6 +392,8 @@ class Handler(BaseHTTPRequestHandler):
             if route in QUOTA_HISTORY_PATHS:
                 target = DASH
                 path = "/v0/management/quota-history" + ("?" + query if query else "")
+            elif self.command == "GET" and route in ACCOUNT_LIST_PATHS:
+                target = DASH
             elif self.command == "POST" and cached_quota_read(route, body):
                 target, path = DASH, "/v0/management/api-call"
             conn = http.client.HTTPConnection(target.hostname, target.port, timeout=3600)
